@@ -1,0 +1,111 @@
+---
+- name: Update WordPress
+  hosts: all
+  become: yes
+  vars:
+    wp_download_url: "https://wordpress.org/latest.zip"
+    base_dir: "/home/beeitdna"
+    wordpress_zip: "{{ base_dir }}/latest.zip"
+    wordpress_dir: "{{ base_dir }}/wordpress"
+
+    docroot: "/var/www/html/public_html"
+    site_name: "abpptsi.org"
+    site_new_name: "{{ site_name }}-new"
+    site_old_name: "{{ site_name }}-old"
+
+  tasks:
+    - name: Ensure base working directory exists
+      file:
+        path: "{{ base_dir }}"
+        state: directory
+
+    - name: Download latest WordPress
+      get_url:
+        url: "{{ wp_download_url }}"
+        dest: "{{ wordpress_zip }}"
+        mode: '0644'
+
+    - name: Unarchive WordPress
+      unarchive:
+        src: "{{ wordpress_zip }}"
+        dest: "{{ base_dir }}"
+        remote_src: yes
+        creates: "{{ wordpress_dir }}"
+
+    - name: Ensure WordPress directory ownership is set correctly
+      file:
+        path: "{{ base_dir }}/wordpress"
+        owner: nobody
+        group: apache
+        recurse: yes
+
+    - name: Ensure wp-content directory ownership is set correctly
+      file:
+        path: "{{ base_dir }}/wordpress/wp-content"
+        owner: wpbinus
+        group: apache
+        recurse: yes
+
+
+
+    - name: Create new site directory
+      file:
+        path: "{{ docroot }}/{{ site_new_name }}"
+        state: directory
+
+    - name: manually sync wordpress files
+      command: "rsync -av /home/beeitdna/wordpress/ /var/www/html/public_html/abpptsi.org-new/"
+      become: yes
+      become_user: root
+
+    - name: Copy .htaccess, wp-content, wp-config.php from old site if exists
+      shell: >
+        cp -Ra {{ docroot }}/{{ site_name }}/.htaccess
+               {{ docroot }}/{{ site_name }}/wp-config.php
+               {{ docroot }}/{{ site_name }}/wp-content
+               {{ docroot }}/{{ site_new_name }}/
+      args:
+        warn: false
+      register: copy_old_files
+      failed_when: false
+
+    - name: Ensure base current existing working directory exists
+      file:
+        path: "{{ docroot }}/{{ site_name }}"
+        state: directory
+
+    - name: Ensure base old working directory exists
+      file:
+        path: "{{ docroot }}/{{ site_old_name }}"
+        state: directory
+
+    - name: Rename (backup) the old site
+      command: "mv {{ docroot }}/{{ site_name }}/ {{ docroot }}/{{ site_old_name }}/"
+      #shell: >
+        #mv {{ docroot }}/{{ site_name }}
+           #{{ docroot }}/{{ site_old_name }}/
+      #args:
+        #warn: false
+      #register: rename_old_site
+      #failed_when: false
+      # Will not fail if the old site directory doesn’t exist.
+
+    - name: Make the new site live
+      command: "mv {{ docroot }}/{{ site_new_name }}/ {{ docroot }}/{{ site_name }}/"
+      #shell: >
+        #mv {{ docroot }}/{{ site_new_name }}/
+           #{{ docroot }}/{{ site_name }}/
+      #args:
+        #warn: false
+      #failed_when: false
+
+    - name: Check WordPress version in new site
+      shell: |
+        find . -name 'version.php' -path '*wp-includes/*' -print -exec grep '$wp_version =' {} \; -exec echo '' \;
+      args:
+        chdir: "{{ docroot }}/{{ site_name }}"
+      register: wp_version_result
+
+    - name: Display WordPress version
+      debug:
+        var: wp_version_result.stdout_lines

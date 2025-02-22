@@ -1,0 +1,206 @@
+---
+- name: Install and configure WordPress with multisite
+  hosts: all
+  become: yes
+  vars:
+    base_dir: "/home/beeitdna"
+    wordpress_url: "https://wordpress.org/latest.zip"
+    wordpress_zip: "{{ base_dir }}/latest.zip"
+    wordpress_dir: "{{ base_dir }}/wordpress"
+    # Direktori instalasi website (sesuaikan jika diperlukan)
+    wp_install_dir: "/var/www/html/public_html/link-web.example.ac.id"
+    # Apache configuration directories
+    apache_sites_available: "/etc/httpd/sites-available"
+    apache_sites_enabled: "/etc/httpd/sites-enabled"
+    # Virtual host file name
+    vhost_file: "link-web.example.ac.id.conf"
+    # File wp-config.php (pastikan WordPress sudah ter-unarchive dahulu)
+    wp_config_file: "{{ wp_install_dir }}/wp-config.php"
+  tasks:
+
+    - name: Ensure base working directory exists
+      file:
+        path: "{{ base_dir }}"
+        state: directory
+
+    #######################################################################
+    # 1. Install Apache dan PHP
+    #######################################################################
+    - name: Install Apache (httpd)
+      dnf:
+        name: httpd
+        state: present
+
+    - name: Install SELinux management utilities
+      dnf:
+        name: policycoreutils-python-utils
+        state: present
+
+    - name: Install paket PHP dan ekstensi yang diperlukan
+      dnf:
+        name:
+          - php
+          - php-cli
+          - php-common
+          - php-fpm
+          - php-mbstring
+          - php-mysqlnd
+          - php-opcache
+          - php-pdo
+          - php-xml
+        state: present
+
+    #######################################################################
+    # 2. Konfigurasi direktori sites-available & sites-enabled dan httpd.conf
+    #######################################################################
+    - name: Buat direktori sites-available dan sites-enabled
+      file:
+        path: "{{ item }}"
+        state: directory
+      loop:
+        - "/etc/httpd/sites-available"
+        - "/etc/httpd/sites-enabled"
+
+    - name: Tambahkan IncludeOptional dan pengaturan ServerTokens/Signature di httpd.conf
+      blockinfile:
+        path: /etc/httpd/conf/httpd.conf
+        marker: "# {mark} ANSIBLE MANAGED BLOCK: WordPress configuration"
+        block: |
+          IncludeOptional sites-enabled/*.conf
+
+          ServerTokens Prod
+          ServerSignature Off
+
+    #######################################################################
+    # 3. Download dan ekstrak WordPress
+    #######################################################################
+    - name: Download WordPress latest.zip
+      get_url:
+        url: "{{ wordpress_url }}"
+        dest: "{{ wordpress_zip }}"
+        mode: '0644'
+
+    - name: Ekstrak WordPress ke direktori instalasi
+      unarchive:
+        src: "{{ wordpress_zip }}"
+        dest: "{{ base_dir }}"
+        remote_src: yes
+        creates: "{{ wordpress_dir }}"
+
+    #######################################################################
+    # 4. Ubah kepemilikan dan permission file
+    #######################################################################
+    - name: Ubah kepemilikan semua file WordPress menjadi nobody:apache
+      file:
+        path: "{{ base_dir }}/wordpress"
+        owner: nobody
+        group: apache
+        recurse: yes
+
+    - name: Ubah kepemilikan folder wp-content menjadi wpbinus:apache
+      file:
+        path: "{{ base_dir }}/wordpress/wp-content"
+        owner: wpbinus
+        group: apache
+        recurse: yes
+
+    - name: Set permission folder wp-content menjadi 0775
+      file:
+        path: "{{ base_dir }}/wordpress/wp-content"
+        mode: '0775'
+        recurse: yes
+
+    #######################################################################
+    # 5. Atur konteks SELinux dan boolean yang diperlukan
+    #######################################################################
+    - name: Ensure target directory is exists
+      file:
+        path: "{{ wp_install_dir }}"
+        state: directory
+
+    - name: Copy from previous extracted zip directory to target directory
+      command: "cp -Ra /home/beeitdna/wordpress/ /var/www/html/public_html/link-web.example.ac.id"
+      become: yes
+
+    - name: Restore konteks SELinux di /var/www/html
+      command: restorecon -Rv /var/www/html
+      #args:
+        #warn: false
+
+    - name: Execute getsebool command
+      command: getsebool -a
+      register: selinux_bools
+
+    - name: Filter for http and connect
+      shell: echo "{{ selinux_bools.stdout_lines | join('\n') }}" | grep http | grep connect
+      register: filtered_output
+      changed_when: false
+
+    - name: Print filtered output
+      debug:
+        msg: "{{ filtered_output.stdout_lines }}"
+
+
+    - name: Set SELinux boolean httpd_can_network_connect on
+      seboolean:
+        name: httpd_can_network_connect
+        state: yes
+        persistent: yes
+
+    - name: Set SELinux boolean httpd_can_sendmail on
+      seboolean:
+        name: httpd_can_sendmail
+        state: yes
+        persistent: yes
+
+    #######################################################################
+    # 6. Konfigurasi Virtual Host Apache untuk website WordPress
+    #######################################################################
+    - name: Buat file virtual host untuk WordPress
+      copy:
+        dest: "{{ apache_sites_available }}/{{ vhost_file }}"
+        content: |
+          <VirtualHost *:80>
+            <Directory "{{ wp_install_dir }}">
+                Options -Indexes
+                Options FollowSymLinks
+                AllowOverride All
+                Require all granted
+            </Directory>
+              ServerName link-web.example.ac.id
+              ServerAlias www.link-web.example.ac.id
+              DocumentRoot {{ wp_install_dir }}
+              ErrorLog    /var/log/httpd/link-web.example.ac.id-error.log
+              CustomLog   /var/log/httpd/link-web.example.ac.id-requests.log combined
+
+              RewriteEngine On
+              RewriteCond %{HTTPS} off
+              RewriteCond %{REQUEST_METHOD} POST
+              RewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI} [QSA,L,R=307]
+              RewriteCond %{HTTPS} off
+              RewriteRule (.*) https://%{HTTP_HOST}%{REQUEST_URI}
+          </VirtualHost>
+
+          <VirtualHost *:443>
+            <Directory "{{ wp_install_dir }}">
+                Options -Indexes
+                Options FollowSymLinks
+                AllowOverride All
+                Require all granted
+            </Directory>
+              SSLEngine On
+              ServerName link-web.example.ac.id
+              ServerAlias www.link-web.example.ac.id
+              DocumentRoot {{ wp_install_dir }}
+              SSLCertificateFile          /etc/ssl/wildcard_binus_ac_id.crt
+              SSLCertificateKeyFile       /etc/ssl/wildcard_binus_ac_id.key
+              SSLCertificateChainFile     /etc/ssl/CACert.crt
+              ErrorLog    /var/log/httpd/ssl-link-web.example.ac.id-error.log
+              CustomLog   /var/log/httpd/ssl-link-web.example.ac.id-request.log combined
+          </VirtualHost>
+
+    - name: Buat symbolic link file virtual host ke sites-enabled
+      command: ln -s /etc/httpd/sites-available/link-web.example.ac.id.conf /etc/httpd/sites-enabled/link-web.example.ac.id
+
+    - name: Restart system apache
+      command: systemctl restart httpd

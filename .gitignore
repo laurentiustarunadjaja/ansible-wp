@@ -1,0 +1,17 @@
+
+# Ignore Vagrant box files
+*.box
+
+# Ignore temporary files
+*.log
+*.tmp
+*.swp
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore specific directories
+.vagrant/
+node_modules/
+__pycache__/
