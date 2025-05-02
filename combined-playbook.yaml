@@ -17,6 +17,10 @@
     # File wp-config.php (pastikan WordPress sudah ter-unarchive dahulu)
     wp_config_file: "{{ wp_install_dir }}/wp-config.php"
 
+    db_name: "dbname"
+    db_user: "admin"
+    db_password: "admin123"
+    db_host: "localhost"
   tasks:
 
     - name: Ensure base working directory exists
@@ -38,11 +42,20 @@
         name: httpd
         state: present
 
+    - name: Install Python3 Py-MySQL
+      dnf:
+        name: python3-PyMySQL
+        state: present
+
     - name: Install SELinux management utilities
       dnf:
         name: policycoreutils-python-utils
         state: present
 
+    - name: Install mariadb-server
+      dnf:
+        name: mariadb-server
+        state: present
 
     - name: Install paket PHP dan ekstensi yang diperlukan
       dnf:
@@ -67,6 +80,12 @@
         state: started
         enabled: yes
 
+    - name: Ensure MariaDB is running
+      service:
+        name: mariadb
+        state: started
+        enabled: yes
+
     #######################################################################
     # 2. Konfigurasi direktori sites-available & sites-enabled dan httpd.conf
     #######################################################################
@@ -87,6 +106,24 @@
 
           ServerTokens Prod
           ServerSignature Off
+    #######################################################################
+    # 3. Create DB and user for WordPress
+    #######################################################################
+
+    - name: Create WordPress database
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_unix_socket: /var/lib/mysql/mysql.sock
+
+    - name: Create WordPress DB user
+      mysql_user:
+        name: "{{ db_user }}"
+        host: "{{ db_host }}"
+        password: "{{ db_password }}"
+        priv: "{{ db_name }}.*:ALL"
+        state: present
+        login_unix_socket: /var/lib/mysql/mysql.sock
 
     #######################################################################
     # 4. Download dan ekstrak WordPress
@@ -233,3 +270,45 @@
 
     - name: Restart system apache
       command: systemctl restart httpd
+
+    - name: Tambahkan di wp-config.php di atas /* That's all, stop editing! Happy publishing. */
+      blockinfile:
+        path: "{{ wp_install_dir }}/wp-config-sample.php"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK: WP_ALLOW_MULTISITE"
+        insertafter: "/* That's all, stop editing! Happy publishing. */"
+        block: |
+           /* Multisite */
+           define( 'WP_ALLOW_MULTISITE', true );
+
+    - name: Tambahkan di wp-config.php di bawah define( 'WP_DEBUG', false );
+      blockinfile:
+        path: "{{ wp_install_dir }}/wp-config-sample.php"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK: WP_MULTISITE CONFIG"
+        insertafter: '/* Add any custom values between this line and the "stop editing" line. */'
+        #insertafter: 'define( 'WP_DEBUG', false );'
+        block: |
+          define('MULTISITE', true);
+          define('SUBDOMAIN_INSTALL', true);
+          define('DOMAIN_CURRENT_SITE', 'link-web.example.ac.id');
+          define('PATH_CURRENT_SITE', '/');
+          define('SITE_ID_CURRENT_SITE', 1);
+          define('BLOG_ID_CURRENT_SITE', 1);
+
+    - name: Buat file virtual host untuk WordPress
+      copy:
+        dest: "{{ wp_install_dir }}/.htaccess"
+        content: |
+           RewriteEngine On
+           RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+           RewriteBase /
+           RewriteRule ^index\.php$ - [L]
+
+           # add a trailing slash to /wp-admin
+           RewriteRule ^([_0-9a-zA-Z-]+/)?wp-admin$ $1wp-admin/ [R=301,L]
+
+           RewriteCond %{REQUEST_FILENAME} -f [OR]
+           RewriteCond %{REQUEST_FILENAME} -d
+           RewriteRule ^ - [L]
+           RewriteRule ^([_0-9a-zA-Z-]+/)?(wp-(content|admin|includes).*) $2 [L]
+           RewriteRule ^([_0-9a-zA-Z-]+/)?(.*\.php)$ $2 [L]
+           RewriteRule . index.php [L]

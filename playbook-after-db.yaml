@@ -16,18 +16,20 @@
     vhost_file: "link-web.example.ac.id.conf"
     # File wp-config.php (pastikan WordPress sudah ter-unarchive dahulu)
     wp_config_file: "{{ wp_install_dir }}/wp-config.php"
+
   tasks:
     - name: Tambahkan di wp-config.php di atas /* That's all, stop editing! Happy publishing. */
       blockinfile:
-        path: "{{ wp_install_dir }}/wordpress/wp-config-sample.php"
+        path: "{{ wp_install_dir }}/wp-config-sample.php"
         marker: "# {mark} ANSIBLE MANAGED BLOCK: WP_ALLOW_MULTISITE"
         insertafter: "/* That's all, stop editing! Happy publishing. */"
         block: |
            /* Multisite */
            define( 'WP_ALLOW_MULTISITE', true );
+
     - name: Tambahkan di wp-config.php di bawah define( 'WP_DEBUG', false );
       blockinfile:
-        path: "{{ wp_install_dir }}/wordpress/wp-config-sample.php"
+        path: "{{ wp_install_dir }}/wp-config-sample.php"
         marker: "# {mark} ANSIBLE MANAGED BLOCK: WP_MULTISITE CONFIG"
         insertafter: '/* Add any custom values between this line and the "stop editing" line. */'
         #insertafter: 'define( 'WP_DEBUG', false );'
@@ -38,9 +40,10 @@
           define('PATH_CURRENT_SITE', '/');
           define('SITE_ID_CURRENT_SITE', 1);
           define('BLOG_ID_CURRENT_SITE', 1);
+
     - name: Buat file virtual host untuk WordPress
       copy:
-        dest: "{{ wp_install_dir }}/wordpress/.htaccess"
+        dest: "{{ wp_install_dir }}/.htaccess"
         content: |
            RewriteEngine On
            RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

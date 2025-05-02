@@ -69,6 +69,9 @@ Vagrant.configure("2") do |config|
   # View the documentation for the provider you are using for more
   # information on available options.
   config.vm.define "rocky9" do |rocky9|
+    rocky9.vm.network :private_network, ip: "10.10.10.10"
+  end
+  config.vm.define "rocky9-target" do |rocky9|
     rocky9.vm.network :private_network, ip: "10.10.10.20"
   end
   # Enable provisioning with a shell script. Additional provisioners such as
