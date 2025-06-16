@@ -266,7 +266,7 @@
           </VirtualHost>
 
     - name: Buat symbolic link file virtual host ke sites-enabled
-      command: ln -s /etc/httpd/sites-available/link-web.example.ac.id.conf /etc/httpd/sites-enabled/link-web.example.ac.id
+      command: ln -s /etc/httpd/sites-available/link-web.example.ac.id.conf /etc/httpd/sites-enabled/link-web.example.ac.id.conf
 
     - name: Restart system apache
       command: systemctl restart httpd
