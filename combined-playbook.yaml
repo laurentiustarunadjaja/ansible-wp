@@ -86,6 +86,11 @@
         state: started
         enabled: yes
 
+    - name: Install SSL module for Apache
+      dnf:
+        name: mod_ssl
+        state: present
+        
     #######################################################################
     # 2. Konfigurasi direktori sites-available & sites-enabled dan httpd.conf
     #######################################################################
